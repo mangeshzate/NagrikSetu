@@ -28,8 +28,15 @@ import {
 
 export default function OnboardingPage() {
   const { language, setLanguage, t } = useLanguage();
-  const { user, completeOnboarding } = useAuth();
+  const { user, isPhoneVerified, completeOnboarding } = useAuth();
   const router = useRouter();
+
+  // Guard: Mandatory verified mobile before onboarding
+  React.useEffect(() => {
+    if (user && user.role === "STUDENT" && !isPhoneVerified) {
+      router.push("/verify-mobile");
+    }
+  }, [user, isPhoneVerified, router]);
 
   const [currentStep, setCurrentStep] = useState(1);
   const totalSteps = 4;
@@ -66,6 +73,10 @@ export default function OnboardingPage() {
   };
 
   const handleFinish = async () => {
+    if (user?.role === "STUDENT" && !isPhoneVerified) {
+      router.push("/verify-mobile");
+      return;
+    }
     setIsSubmitting(true);
     try {
       const selectedIncomeMeta = INCOME_RANGES.find((i) => i.value === incomeRange);

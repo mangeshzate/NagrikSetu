@@ -61,6 +61,8 @@ export interface UserProfile {
   role: UserRole;
   preferredLanguage: LanguageCode;
   onboardingCompleted: boolean;
+  phone?: string;
+  phoneVerified?: boolean;
   createdAt: string;
   updatedAt: string;
 }

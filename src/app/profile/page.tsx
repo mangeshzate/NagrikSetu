@@ -162,17 +162,40 @@ export default function ProfilePage() {
                 className="block w-full rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-500 font-medium cursor-not-allowed"
               />
             </div>
-          </div>
 
-          <div className="pt-1">
-            <Select
-              label={language === "mr" ? "प्राधान्य भाषा" : "Preferred Language"}
-              value={prefLang}
-              onChange={(e) => setPrefLang(e.target.value as LanguageCode)}
-            >
-              <option value="mr">मराठी (Marathi)</option>
-              <option value="en">English</option>
-            </Select>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="block text-sm font-medium text-slate-700">
+                  {t("auth.mobileNumber")}
+                </label>
+                {user?.phoneVerified ? (
+                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                    {language === "mr" ? "सत्यापित ✓" : "Verified ✓"}
+                  </span>
+                ) : (
+                  <Link href="/verify-mobile" className="text-[11px] font-bold text-amber-700 hover:underline">
+                    {language === "mr" ? "आता सत्यापित करा →" : "Verify now →"}
+                  </Link>
+                )}
+              </div>
+              <input
+                type="text"
+                disabled
+                value={user?.phone || (user?.phoneVerified ? "+91 98*** **321" : "Not verified")}
+                className="block w-full rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-500 font-medium cursor-not-allowed font-mono"
+              />
+            </div>
+
+            <div className="pt-1">
+              <Select
+                label={language === "mr" ? "प्राधान्य भाषा" : "Preferred Language"}
+                value={prefLang}
+                onChange={(e) => setPrefLang(e.target.value as LanguageCode)}
+              >
+                <option value="mr">मराठी (Marathi)</option>
+                <option value="en">English</option>
+              </Select>
+            </div>
           </div>
         </div>
 

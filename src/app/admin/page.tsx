@@ -79,9 +79,9 @@ export default function AdminDashboardPage() {
           </p>
         </div>
         <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
-          <Link href="/login">
+          <Link href="/admin/login">
             <Button size="sm" variant="primary">
-              {language === "mr" ? "प्रशासक लॉगिन करा" : "Switch to Admin"}
+              {language === "mr" ? "प्रशासक लॉगिन करा" : "Administrator Login"}
             </Button>
           </Link>
           <Link href="/dashboard">
