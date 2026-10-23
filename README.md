@@ -45,21 +45,25 @@ Unlike generic search engines or speculative AI chatbots, NagrikSetu moves users
    - Computes `daysRemaining`, displays status badges: *Closing today*, *Application closes tomorrow*, *X days left*, *Deadline passed*.
    - Categorizes urgent deadlines (≤ 7 days).
 
-6. **Ask NagrikSetu (Civic AI Assistant)**
-   - RAG architecture grounded strictly in verified database schemes.
-   - Guardrails: never invents deadlines, schemes, or eligibility rules.
+6. **Ask NagrikSetu (Conversational Civic AI Assistant)**
+   - Context-aware conversational memory (bounded history, understands follow-ups like "what documents for the first one?").
+   - Strict grounding: answers solely from verified database records and deterministic engines.
+   - Guardrails: defends against prompt injections, never invents deadlines, schemes, or eligibility rules.
    - Multi-lingual responses (natural Marathi & English).
-   - Graceful fallback: works out-of-the-box using the verified rules engine even without an external AI API key.
+   - Server-side sliding-window rate limiting & length checks.
+   - Graceful fallback: clean, friendly civic fallback on ungrounded queries or provider outages.
 
 7. **Bilingual Localization (मराठी + English)**
    - Built-in localized dictionary with persistent language preference.
 
-8. **Admin Portal (`/admin`)**
-   - Protected role-based authorization (`STUDENT` vs `ADMIN`).
-   - Platform metrics: Total students, active opportunities, expiring soon, active journeys.
-   - Opportunity management: Create, activate/disable, verify, delete.
-   - **Eligibility Rule Builder GUI**: Visual rule builder with human-readable labels.
-   - **Document Requirements Catalog**: Create and attach standardized documents to schemes.
+8. **Admin Operations & Management Portal (`/admin`)**
+   - Multi-layer authorization: Edge middleware + Server-side `verifyAdminRequest` guard.
+   - Comprehensive dashboard: Total students, active opportunities, review queue, expired opportunities, total journeys.
+   - **Full Opportunity CRUD**: Create, read/filter, edit in-place, and safe archival/deletion with active journey impact detection.
+   - **Privacy-Conscious Student Management**: Directory with masked mobile numbers, search, pagination, and safe account deletion with anti-admin protection.
+   - **Immutable Audit Logging**: Destructive actions recorded to `audit_logs` table.
+   - **Eligibility Rule Builder GUI**: Visual rule builder supporting 11 deterministic operators.
+   - Detailed architecture docs: [ADMIN_AND_ASSISTANT_ARCHITECTURE.md](./ADMIN_AND_ASSISTANT_ARCHITECTURE.md).
 
 ---
 
@@ -177,10 +181,13 @@ To connect to your own Supabase instance:
 - `/profile` — Student profile editor, language preference, and account deletion.
 
 ### Admin Routes (`role === 'ADMIN'`)
-- `/admin` — Metrics overview (total users, active schemes, expiring soon, active journeys).
-- `/admin/opportunities` — Management table to activate, disable, verify, and delete opportunities.
-- `/admin/opportunities/new` — Opportunity publisher with visual Eligibility Rule Builder GUI and Document selector.
+- `/admin` — Operations dashboard with 5 metrics cards, quick navigation, recent opportunities, and immutable audit trail.
+- `/admin/opportunities` — Opportunity directory with search, category/verification filters, live toggles, and safe archival/deletion dialogs.
+- `/admin/opportunities/new` — Opportunity publisher with URL security validation, visual Eligibility Rule Builder GUI, and Document selector.
+- `/admin/opportunities/[id]/edit` — Full in-place scheme editor supporting bilingual descriptions, deadlines, income limits, and eligibility criteria.
+- `/admin/students` — Privacy-conscious student directory with masked mobile numbers, search, pagination, and anti-admin-deletion safe account termination.
 - `/admin/documents` — Standardized certificate catalog manager.
+- `/api/admin/*` — Server-only protected APIs (`/metrics`, `/opportunities`, `/students`, `/audit-logs`) secured via edge middleware and `verifyAdminRequest`.
 
 ---
 

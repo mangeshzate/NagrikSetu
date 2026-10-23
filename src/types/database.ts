@@ -206,3 +206,33 @@ export interface AdditionalProfileAnswer {
   value: any;
   updatedAt: string;
 }
+
+export type AuditAction = 
+  | "OPPORTUNITY_CREATED"
+  | "OPPORTUNITY_UPDATED"
+  | "OPPORTUNITY_ARCHIVED"
+  | "OPPORTUNITY_DELETED"
+  | "STUDENT_DELETED";
+
+export interface AuditLog {
+  id: string;
+  adminId: string;
+  action: AuditAction;
+  targetResourceType: "OPPORTUNITY" | "STUDENT_USER" | "DOCUMENT";
+  targetResourceId: string;
+  details?: Record<string, any>;
+  createdAt: string;
+}
+
+export interface StudentUserSummary {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  maskedMobile: string;
+  onboardingCompleted: boolean;
+  createdAt: string;
+  district?: string;
+  educationLevel?: string;
+  activeJourneysCount: number;
+}

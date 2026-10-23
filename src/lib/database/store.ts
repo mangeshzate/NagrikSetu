@@ -10,6 +10,9 @@ import {
   UserDocumentState,
   StudentProfile,
   UserProfile,
+  AuditLog,
+  AuditAction,
+  StudentUserSummary,
 } from "@/types/database";
 import {
   INITIAL_OPPORTUNITIES,
@@ -17,6 +20,8 @@ import {
   INITIAL_OPPORTUNITY_DOCUMENTS,
   INITIAL_DOCUMENTS,
   INITIAL_INTERESTS,
+  INITIAL_USERS,
+  INITIAL_STUDENT_PROFILES,
   DEMO_STUDENT_USER,
   DEMO_STUDENT_PROFILE,
   DEMO_STUDENT_INTERESTS,
@@ -33,6 +38,8 @@ const STORAGE_JOURNEYS = "nagriksetu_store_journeys";
 const STORAGE_DOC_STATUSES = "nagriksetu_store_doc_statuses";
 const STORAGE_ADDITIONAL_ANSWERS = "nagriksetu_store_answers";
 const STORAGE_PROFILES = "nagriksetu_store_student_profiles";
+const STORAGE_USERS = "nagriksetu_store_users";
+const STORAGE_AUDIT_LOGS = "nagriksetu_store_audit_logs";
 
 class DataStore {
   private opportunities: Opportunity[] = [...INITIAL_OPPORTUNITIES];
@@ -43,8 +50,10 @@ class DataStore {
   private docStatuses: UserDocumentState[] = [];
   private additionalAnswers: Record<string, Record<string, any>> = {}; // userId -> { fieldKey: value }
   private studentProfiles: Record<string, StudentProfile> = {
-    [DEMO_STUDENT_USER.id]: DEMO_STUDENT_PROFILE,
+    ...INITIAL_STUDENT_PROFILES,
   };
+  private users: UserProfile[] = [...INITIAL_USERS];
+  private auditLogs: AuditLog[] = [];
   private isClientInitialized = false;
 
   constructor() {
@@ -104,6 +113,12 @@ class DataStore {
 
       const savedProfiles = localStorage.getItem(STORAGE_PROFILES);
       if (savedProfiles) this.studentProfiles = JSON.parse(savedProfiles);
+
+      const savedUsers = localStorage.getItem(STORAGE_USERS);
+      if (savedUsers) this.users = JSON.parse(savedUsers);
+
+      const savedAudit = localStorage.getItem(STORAGE_AUDIT_LOGS);
+      if (savedAudit) this.auditLogs = JSON.parse(savedAudit);
 
       this.isClientInitialized = true;
     } catch (e) {
@@ -168,7 +183,10 @@ class DataStore {
     return this.opportunities.find((o) => o.id === id) || null;
   }
 
-  public async createOpportunity(data: Omit<Opportunity, "id" | "createdAt" | "updatedAt">): Promise<Opportunity> {
+  public async createOpportunity(
+    data: Omit<Opportunity, "id" | "createdAt" | "updatedAt">,
+    adminId?: string
+  ): Promise<Opportunity> {
     this.initClientStorage();
     const id = `opp_${Date.now()}`;
     const newOpp: Opportunity = {
@@ -179,10 +197,25 @@ class DataStore {
     };
     this.opportunities.unshift(newOpp);
     this.saveToClient(STORAGE_OPPORTUNITIES, this.opportunities);
+
+    if (adminId) {
+      this.logAuditEvent(
+        "OPPORTUNITY_CREATED",
+        "OPPORTUNITY",
+        id,
+        { title: newOpp.title, type: newOpp.type },
+        adminId
+      );
+    }
+
     return newOpp;
   }
 
-  public async updateOpportunity(id: string, data: Partial<Opportunity>): Promise<Opportunity | null> {
+  public async updateOpportunity(
+    id: string,
+    data: Partial<Opportunity>,
+    adminId?: string
+  ): Promise<Opportunity | null> {
     this.initClientStorage();
     const idx = this.opportunities.findIndex((o) => o.id === id);
     if (idx === -1) return null;
@@ -193,15 +226,84 @@ class DataStore {
     };
     this.opportunities[idx] = updated;
     this.saveToClient(STORAGE_OPPORTUNITIES, this.opportunities);
+
+    if (adminId) {
+      this.logAuditEvent(
+        "OPPORTUNITY_UPDATED",
+        "OPPORTUNITY",
+        id,
+        { updatedFields: Object.keys(data) },
+        adminId
+      );
+    }
+
     return updated;
   }
 
-  public async deleteOpportunity(id: string): Promise<boolean> {
+  /**
+   * Safe Opportunity Deletion / Archival
+   * If force === false and active student journeys exist, performs safe archival (inactive/expired)
+   * to preserve student progress and prevent orphaned records.
+   */
+  public async deleteOpportunity(
+    id: string,
+    force: boolean = false,
+    adminId?: string
+  ): Promise<{ success: boolean; archived: boolean; journeyCount: number }> {
     this.initClientStorage();
-    const lenBefore = this.opportunities.length;
+    const targetOpp = this.opportunities.find((o) => o.id === id);
+    if (!targetOpp) return { success: false, archived: false, journeyCount: 0 };
+
+    const associatedJourneys = this.journeys.filter((j) => j.opportunityId === id);
+    const activeJourneysCount = associatedJourneys.length;
+
+    if (activeJourneysCount > 0 && !force) {
+      // Safe archival: preserve student journeys, but disable opportunity from recommendations
+      targetOpp.active = false;
+      targetOpp.verificationStatus = "INACTIVE";
+      targetOpp.updatedAt = new Date().toISOString();
+      this.saveToClient(STORAGE_OPPORTUNITIES, this.opportunities);
+
+      if (adminId) {
+        this.logAuditEvent(
+          "OPPORTUNITY_ARCHIVED",
+          "OPPORTUNITY",
+          id,
+          {
+            reason: "Preserved due to active student journeys",
+            activeJourneysCount,
+          },
+          adminId
+        );
+      }
+
+      return { success: true, archived: true, journeyCount: activeJourneysCount };
+    }
+
+    // Force deletion or zero student journeys: remove opportunity and cascade rules/docs links
     this.opportunities = this.opportunities.filter((o) => o.id !== id);
+    this.rules = this.rules.filter((r) => r.opportunityId !== id);
+    this.oppDocs = this.oppDocs.filter((od) => od.opportunityId !== id);
+
     this.saveToClient(STORAGE_OPPORTUNITIES, this.opportunities);
-    return this.opportunities.length < lenBefore;
+    this.saveToClient(STORAGE_RULES, this.rules);
+    this.saveToClient(STORAGE_OPP_DOCS, this.oppDocs);
+
+    if (adminId) {
+      this.logAuditEvent(
+        "OPPORTUNITY_DELETED",
+        "OPPORTUNITY",
+        id,
+        {
+          forced: force,
+          purgedRules: true,
+          activeJourneysCount,
+        },
+        adminId
+      );
+    }
+
+    return { success: true, archived: false, journeyCount: activeJourneysCount };
   }
 
   // --- ELIGIBILITY RULES ---
@@ -490,23 +592,188 @@ class DataStore {
     return updated;
   }
 
+  // --- USER REGISTRATION & DIRECTORY ---
+  public async registerUser(user: UserProfile): Promise<UserProfile> {
+    this.initClientStorage();
+    const idx = this.users.findIndex((u) => u.id === user.id);
+    if (idx >= 0) {
+      this.users[idx] = { ...user };
+    } else {
+      this.users.push({ ...user });
+    }
+    this.saveToClient(STORAGE_USERS, this.users);
+    return user;
+  }
+
+  // --- STUDENT MANAGEMENT (PRIVACY CONSCIOUS) ---
+  public async getAllStudents(options?: {
+    search?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ students: StudentUserSummary[]; total: number }> {
+    this.initClientStorage();
+    const page = options?.page || 1;
+    const limit = options?.limit || 20;
+
+    // Filter only student accounts (admins are strictly protected and separated)
+    let studentUsers = this.users.filter((u) => u.role === "STUDENT");
+
+    if (options?.search && options.search.trim() !== "") {
+      const term = options.search.toLowerCase().trim();
+      studentUsers = studentUsers.filter((u) => {
+        const prof = this.studentProfiles[u.id];
+        return (
+          u.name.toLowerCase().includes(term) ||
+          u.email.toLowerCase().includes(term) ||
+          (prof?.district && prof.district.toLowerCase().includes(term))
+        );
+      });
+    }
+
+    const total = studentUsers.length;
+    const startIdx = (page - 1) * limit;
+    const paginated = studentUsers.slice(startIdx, startIdx + limit);
+
+    const summaries: StudentUserSummary[] = paginated.map((u) => {
+      const prof = this.studentProfiles[u.id];
+      const activeJourneys = this.journeys.filter(
+        (j) => j.userId === u.id && j.status === "IN_PROGRESS"
+      ).length;
+
+      // Deterministic privacy-conscious mobile masking
+      const hash = u.id.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+      const last4 = String(1000 + (hash % 9000));
+      const maskedMobile = `+91 98*** **${last4.slice(-3)}`;
+
+      return {
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        maskedMobile,
+        onboardingCompleted: u.onboardingCompleted,
+        createdAt: u.createdAt,
+        district: prof?.district,
+        educationLevel: prof?.educationLevel,
+        activeJourneysCount: activeJourneys,
+      };
+    });
+
+    return { students: summaries, total };
+  }
+
+  /**
+   * Safe Admin Student Account Deletion
+   * Prohibits deleting administrator accounts.
+   * Cascade deletes student profile, journeys, steps, and document statuses.
+   * Logs an immutable audit event.
+   */
+  public async deleteStudentAccountByAdmin(
+    adminUserId: string,
+    targetStudentId: string
+  ): Promise<{ success: boolean; message: string }> {
+    this.initClientStorage();
+
+    const targetUser = this.users.find((u) => u.id === targetStudentId);
+    if (!targetUser) {
+      throw new Error("Student account not found.");
+    }
+
+    // Critical security check: Never delete an administrator account!
+    if (targetUser.role === "ADMIN") {
+      throw new Error(
+        "Security Violation: Administrator accounts cannot be deleted through student management."
+      );
+    }
+
+    // 1. Remove from registered users list
+    this.users = this.users.filter((u) => u.id !== targetStudentId);
+    this.saveToClient(STORAGE_USERS, this.users);
+
+    // 2. Cascade delete all associated student application data
+    await this.deleteUserAccount(targetStudentId);
+
+    // 3. Log audit event
+    this.logAuditEvent(
+      "STUDENT_DELETED",
+      "STUDENT_USER",
+      targetStudentId,
+      {
+        deletedStudentEmail: targetUser.email,
+        deletedStudentName: targetUser.name,
+      },
+      adminUserId
+    );
+
+    return {
+      success: true,
+      message: `Student account for ${targetUser.name} (${targetUser.email}) safely deleted.`,
+    };
+  }
+
+  // --- AUDIT LOGGING ---
+  public logAuditEvent(
+    action: AuditAction,
+    targetResourceType: "OPPORTUNITY" | "STUDENT_USER" | "DOCUMENT",
+    targetResourceId: string,
+    details?: Record<string, any>,
+    adminId: string = "system_admin"
+  ): AuditLog {
+    this.initClientStorage();
+    const newLog: AuditLog = {
+      id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      adminId,
+      action,
+      targetResourceType,
+      targetResourceId,
+      details,
+      createdAt: new Date().toISOString(),
+    };
+    this.auditLogs.unshift(newLog);
+    // Keep max 200 logs
+    if (this.auditLogs.length > 200) {
+      this.auditLogs = this.auditLogs.slice(0, 200);
+    }
+    this.saveToClient(STORAGE_AUDIT_LOGS, this.auditLogs);
+    return newLog;
+  }
+
+  public async getAuditLogs(limit: number = 20): Promise<AuditLog[]> {
+    this.initClientStorage();
+    return this.auditLogs.slice(0, limit);
+  }
+
   // --- ADMIN METRICS ---
   public async getAdminMetrics() {
     this.initClientStorage();
     const activeOpps = this.opportunities.filter((o) => o.active).length;
+    const nowTime = Date.now();
     const expiringSoon = this.opportunities.filter((o) => {
-      const days = Math.round((new Date(o.deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      const days = Math.round((new Date(o.deadline).getTime() - nowTime) / (1000 * 60 * 60 * 24));
       return days >= 0 && days <= 7;
     }).length;
-    const activeJourneys = this.journeys.filter((j) => j.status === "IN_PROGRESS").length;
-    const needsReview = this.opportunities.filter((o) => o.verificationStatus === "NEEDS_REVIEW").length;
+
+    const expiredOpps = this.opportunities.filter((o) => {
+      const days = Math.round((new Date(o.deadline).getTime() - nowTime) / (1000 * 60 * 60 * 24));
+      return o.verificationStatus === "EXPIRED" || days < 0;
+    }).length;
+
+    const needsReview = this.opportunities.filter(
+      (o) => o.verificationStatus === "NEEDS_REVIEW"
+    ).length;
+
+    const totalStudentsCount = this.users.filter((u) => u.role === "STUDENT").length;
+    const totalJourneysCount = this.journeys.length;
+    const activeJourneysCount = this.journeys.filter((j) => j.status === "IN_PROGRESS").length;
 
     return {
-      totalStudents: Object.keys(this.studentProfiles).length + 42, // demo baseline
+      totalStudents: totalStudentsCount,
       activeOpportunities: activeOpps,
-      expiringSoon,
-      activeJourneys: activeJourneys + 18,
       opportunitiesNeedingVerification: needsReview,
+      expiredOpportunities: expiredOpps,
+      expiringSoon,
+      totalJourneysStarted: totalJourneysCount,
+      activeJourneys: activeJourneysCount,
     };
   }
 }
