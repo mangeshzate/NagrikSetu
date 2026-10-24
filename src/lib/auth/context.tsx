@@ -50,6 +50,17 @@ export function normalizeIndianMobile(raw: string): string | null {
   return null;
 }
 
+/**
+ * Sanitizes auth error messages to prevent exposing internal tokens, secrets, or keys to the UI.
+ */
+export function sanitizeAuthError(message?: string): string {
+  if (!message) return "Failed to send verification code.";
+  return message
+    .replace(/bearer\s+[a-zA-Z0-9_\-\.]+/gi, "Bearer [REDACTED]")
+    .replace(/(key|token|secret|password)[=:\s]+[a-zA-Z0-9_\-\.]+/gi, "$1=[REDACTED]")
+    .trim();
+}
+
 function setDemoSessionCookie(user: UserProfile) {
   if (typeof document === "undefined") return;
   const sessionData = {
@@ -363,14 +374,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             phone: normalized,
           });
           if (error) {
-            // Check for missing SMS provider
-            if (error.message?.toLowerCase().includes("provider") || error.message?.toLowerCase().includes("sms")) {
-              return {
-                success: false,
-                error: "Code integration complete; external SMS provider configuration required in Supabase. Please see AUTH_SETUP.md.",
-              };
-            }
-            return { success: false, error: error.message };
+            console.error("[sendMobileOtp Error]", error);
+            return { success: false, error: sanitizeAuthError(error.message) };
           }
           return { success: true };
         }
@@ -384,18 +389,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
 
         if (error) {
-          if (error.message?.toLowerCase().includes("provider") || error.message?.toLowerCase().includes("sms") || error.status === 400) {
-            return {
-              success: false,
-              error: "Code integration complete; external SMS provider configuration required in Supabase. Please see AUTH_SETUP.md.",
-            };
-          }
-          return { success: false, error: error.message };
+          console.error("[sendMobileOtp Error]", error);
+          return { success: false, error: sanitizeAuthError(error.message) };
         }
 
         return { success: true };
       } catch (e: any) {
-        return { success: false, error: e?.message || "Failed to send SMS OTP." };
+        console.error("[sendMobileOtp Error]", e);
+        return { success: false, error: sanitizeAuthError(e?.message) };
       }
     }
 
